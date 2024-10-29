@@ -6,8 +6,15 @@ from datetime import datetime, timedelta
 import time
 import pandas as pd
 import numpy as np
-from scipy.signal import argrelextrema
 import ta
+
+# Optional imports with fallbacks
+try:
+    from scipy.signal import argrelextrema
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    st.warning("scipy not installed. Some features will be disabled. Install scipy for full functionality.")
 
 class TechnicalAnalysis:
     @staticmethod
@@ -37,6 +44,12 @@ class TechnicalAnalysis:
     @staticmethod
     def find_support_resistance(data, window=20):
         """Find support and resistance levels"""
+        if not SCIPY_AVAILABLE:
+            # Simplified S/R calculation without scipy
+            resistance_levels = data['High'].rolling(window=window).max()
+            support_levels = data['Low'].rolling(window=window).min()
+            return support_levels, resistance_levels
+
         local_max = argrelextrema(data['High'].values, np.greater_equal, order=window)[0]
         local_min = argrelextrema(data['Low'].values, np.less_equal, order=window)[0]
         
@@ -79,16 +92,23 @@ class DataManager:
             '1y': '1d'
         }
         
-        gld = yf.Ticker("GLD")
-        data = gld.history(
-            period=periods.get(timeframe, '1d'),
-            interval=intervals.get(timeframe, '1m')
-        )
-        return data
+        try:
+            gld = yf.Ticker("GLD")
+            data = gld.history(
+                period=periods.get(timeframe, '1d'),
+                interval=intervals.get(timeframe, '1m')
+            )
+            return data
+        except Exception as e:
+            st.error(f"Error fetching data: {str(e)}")
+            return pd.DataFrame()  # Return empty DataFrame on error
 
     @staticmethod
     def calculate_buy_sell_volume(data):
         """Enhanced volume analysis"""
+        if data.empty:
+            return data
+            
         data['Typical_Price'] = (data['High'] + data['Low'] + data['Close']) / 3
         data['VP'] = data['Typical_Price'] * data['Volume']
         data['VWAP'] = data['VP'].cumsum() / data['Volume'].cumsum()
@@ -116,8 +136,9 @@ class DataManager:
         total_volume = data['Volume'].sum()
         total_calculated = data['Buy_Volume'].sum() + data['Sell_Volume'].sum()
         
-        data['Buy_Volume'] = (data['Buy_Volume'] / total_calculated) * total_volume
-        data['Sell_Volume'] = (data['Sell_Volume'] / total_calculated) * total_volume
+        if total_calculated > 0:  # Prevent division by zero
+            data['Buy_Volume'] = (data['Buy_Volume'] / total_calculated) * total_volume
+            data['Sell_Volume'] = (data['Sell_Volume'] / total_calculated) * total_volume
         
         return data
 
@@ -125,6 +146,9 @@ class ChartManager:
     @staticmethod
     def create_advanced_chart(data, selected_indicators, chart_type="Candlestick"):
         """Create advanced chart with multiple panels"""
+        if data.empty:
+            return None
+            
         fig = make_subplots(
             rows=3, 
             cols=1,
@@ -305,6 +329,9 @@ class Dashboard:
 
     def display_metrics(self, data):
         """Display key metrics"""
+        if data.empty:
+            return
+            
         current_price = float(data['Close'].iloc[-1])
         period_high = float(data['High'].max())
         period_low = float(data['Low'].min())
@@ -342,14 +369,13 @@ class Dashboard:
                         self.display_metrics(data)
                         
                         # Main chart
-                        st.plotly_chart(
-                            ChartManager.create_advanced_chart(
-                                data,
-                                self.selected_indicators,
-                                self.chart_type
-                            ),
-                            use_container_width=True
+                        chart = ChartManager.create_advanced_chart(
+                            data,
+                            self.selected_indicators,
+                            self.chart_type
                         )
+                        if chart:
+                            st.plotly_chart(chart, use_container_width=True)
                     
                     # Technical Analysis Tab
                     with self.analysis_tab:
@@ -377,31 +403,3 @@ class Dashboard:
                             "🟢" if rsi_value < 30 else 
                             "⚪"
                         )
-                        st.write(f"RSI ({rsi_value:.2f}): {rsi_color}")
-                        
-                        # Trend Analysis
-                        sma20 = data['SMA20'].iloc[-1]
-                        sma50 = data['SMA50'].iloc[-1]
-                        price = data['Close'].iloc[-1]
-                        
-                        trend_analysis = []
-                        if price > sma20: trend_analysis.append("Price above 20 SMA")
-                        else: trend_analysis.append("Price below 20 SMA")
-                        
-                        if sma20 > sma50: trend_analysis.append("Golden Cross")
-                        else: trend_analysis.append("Death Cross")
-                        
-                        st.write("Trend Analysis:")
-                        for analysis in trend_analysis:
-                            st.write(f"• {analysis}")
-                
-                # Sleep for the specified refresh rate
-                time.sleep(self.refresh_rate * 60)
-                
-            except Exception as e:
-                st.error(f"Error updating dashboard: {e}")
-                time.sleep(self.refresh_rate * 60)
-
-if __name__ == "__main__":
-    dashboard = Dashboard()
-    dashboard.run()
