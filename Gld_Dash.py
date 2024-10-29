@@ -109,34 +109,6 @@ def get_gld_data(timeframe='1d', interval='1m'):
         data = gld.history(period=timeframe, interval=interval)
     return data
 
-def save_daily_summary(current_price, day_high, day_low, buy_volume, sell_volume, trend):
-    try:
-        if pd.isna([current_price, day_high, day_low, buy_volume, sell_volume]).any():
-            return
-
-        if not isinstance(trend, str) or not any(symbol in trend for symbol in ['🟢', '🔴', '⚪']):
-            return
-            
-        data = pd.DataFrame([{
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'current_price': f"{float(current_price):.2f}",
-            'day_high': f"{float(day_high):.2f}",
-            'day_low': f"{float(day_low):.2f}",
-            'buy_volume': f"{int(buy_volume)}",
-            'sell_volume': f"{int(sell_volume)}",
-            'trend': trend
-        }])
-
-        file_path = 'gld_daily_data.csv'
-        
-        data.to_csv(file_path, 
-                   mode='a',
-                   header=not os.path.exists(file_path),
-                   index=False)
-                     
-    except Exception as e:
-        st.error(f"Error saving to CSV: {e}")
-
 def create_price_chart(data, title_prefix="GLD"):
     fig = go.Figure()
     
@@ -241,12 +213,16 @@ def main():
     
     st.title("📈 Real-time GLD Price Dashboard")
     
+    # Convert refresh rate to minutes
     refresh_rate = st.sidebar.slider(
-        "Refresh Rate (seconds)",
-        min_value=5,
-        max_value=60,
-        value=30
+        "Refresh Rate (minutes)",
+        min_value=1,
+        max_value=30,
+        value=5
     )
+    
+    # Convert minutes to seconds for the sleep function
+    refresh_seconds = refresh_rate * 60
 
     if 'chart_key' not in st.session_state:
         st.session_state.chart_key = 0
@@ -256,7 +232,6 @@ def main():
     
     # Create placeholder containers for each tab
     with daily_tab:
-        daily_csv_status = st.empty()
         daily_trend_placeholder = st.empty()
         daily_metrics_placeholder = st.empty()
         daily_chart_placeholder = st.empty()
@@ -275,20 +250,7 @@ def main():
                 daily_data = calculate_buy_sell_volume(daily_data)
                 
                 with daily_tab:
-                    # Update daily view
                     try:
-                        current_price = float(daily_data['Close'].iloc[-1])
-                        day_high = float(daily_data['High'].max())
-                        day_low = float(daily_data['Low'].min())
-                        buy_volume = int(daily_data['Buy_Volume'].sum())
-                        sell_volume = int(daily_data['Sell_Volume'].sum())
-                        
-                        save_daily_summary(current_price, day_high, day_low, 
-                                        buy_volume, sell_volume, daily_trend)
-                        
-                        last_update = datetime.now().strftime('%H:%M:%S')
-                        daily_csv_status.success(f"Data saved to gld_daily.csv (Last update: {last_update})")
-                        
                         with daily_trend_placeholder.container():
                             st.subheader(f"Current Trend: {daily_trend}")
                             st.write("Analysis based on:")
@@ -312,7 +274,6 @@ def main():
                 monthly_data = calculate_buy_sell_volume(monthly_data)
                 
                 with monthly_tab:
-                    # Update monthly view
                     try:
                         with monthly_trend_placeholder.container():
                             st.subheader(f"Monthly Trend: {monthly_trend}")
@@ -331,11 +292,11 @@ def main():
                         st.error(f"Error processing monthly data: {e}")
 
             st.session_state.chart_key += 1
-            time.sleep(refresh_rate)
+            time.sleep(refresh_seconds)
             
         except Exception as e:
             st.error(f"Error fetching data: {e}")
-            time.sleep(refresh_rate)
+            time.sleep(refresh_seconds)
 
 if __name__ == "__main__":
     main()
