@@ -17,13 +17,6 @@ class TechnicalAnalysis:
         data['RSI'] = ta.momentum.rsi(data['Close'], window=14)
         return data
 
-    @staticmethod
-    def find_support_resistance(data, window=20):
-        """Find support and resistance levels"""
-        resistance_levels = data['High'].rolling(window=window).max()
-        support_levels = data['Low'].rolling(window=window).min()
-        return support_levels, resistance_levels
-
 class DataManager:
     @staticmethod
     def get_gld_data(timeframe='1d'):
@@ -157,80 +150,73 @@ class ChartManager:
 
         return fig
 
-# Initialize session state
-if 'last_update' not in st.session_state:
-    st.session_state['last_update'] = datetime.now()
+def setup_sidebar():
+    """Setup sidebar controls"""
+    st.sidebar.title("Dashboard Controls")
+    
+    timeframe = st.sidebar.selectbox(
+        "Select Time Period",
+        ['1d', '1w', '1m', '3m', '6m', '1y'],
+        format_func=lambda x: {
+            '1d': '1 Day',
+            '1w': '1 Week',
+            '1m': '1 Month',
+            '3m': '3 Months',
+            '6m': '6 Months',
+            '1y': '1 Year'
+        }[x]
+    )
+    
+    selected_indicators = st.sidebar.multiselect(
+        "Select Technical Indicators",
+        ["Moving Averages"],
+        default=["Moving Averages"]
+    )
+    
+    chart_type = st.sidebar.selectbox(
+        "Select Chart Type",
+        ["Candlestick", "Line"]
+    )
+    
+    return timeframe, selected_indicators, chart_type
 
-st.set_page_config(page_title="GLD Dashboard", page_icon="📈", layout="wide")
-st.title("📈 GLD Price Dashboard")
+def display_metrics(data):
+    """Display key metrics"""
+    if data.empty:
+        return
+        
+    current_price = float(data['Close'].iloc[-1])
+    period_high = float(data['High'].max())
+    period_low = float(data['Low'].min())
+    price_change = float(data['Close'].iloc[-1] - data['Close'].iloc[0])
+    price_change_pct = (price_change / float(data['Close'].iloc[0])) * 100
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric(
+        "Current Price", 
+        f"${current_price:.2f}", 
+        f"{price_change_pct:.2f}%"
+    )
+    col2.metric("Period High", f"${period_high:.2f}")
+    col3.metric("Period Low", f"${period_low:.2f}")
 
-# Sidebar controls
-st.sidebar.title("Dashboard Controls")
+def main():
+    st.set_page_config(page_title="GLD Dashboard", page_icon="📈", layout="wide")
+    st.title("📈 GLD Price Dashboard")
 
-timeframe = st.sidebar.selectbox(
-    "Select Time Period",
-    ['1d', '1w', '1m', '3m', '6m', '1y'],
-    format_func=lambda x: {
-        '1d': '1 Day',
-        '1w': '1 Week',
-        '1m': '1 Month',
-        '3m': '3 Months',
-        '6m': '6 Months',
-        '1y': '1 Year'
-    }[x]
-)
+    # Setup sidebar
+    timeframe, selected_indicators, chart_type = setup_sidebar()
 
-selected_indicators = st.sidebar.multiselect(
-    "Select Technical Indicators",
-    ["Moving Averages"],
-    default=["Moving Averages"]
-)
-
-chart_type = st.sidebar.selectbox(
-    "Select Chart Type",
-    ["Candlestick", "Line"]
-)
-
-refresh_rate = st.sidebar.slider(
-    "Refresh Rate (minutes)",
-    min_value=1,
-    max_value=30,
-    value=5
-)
-
-# Add a refresh button
-if st.sidebar.button('Refresh Data'):
-    st.session_state['last_update'] = datetime.now()
-
-# Main content
-try:
-    # Check if it's time to refresh
-    time_since_update = datetime.now() - st.session_state['last_update']
-    if time_since_update.total_seconds() >= refresh_rate * 60:
-        st.session_state['last_update'] = datetime.now()
-        st.experimental_rerun()
-
+    # Get data
     data = DataManager.get_gld_data(timeframe)
+    
     if not data.empty:
         # Calculate indicators
         data = TechnicalAnalysis.calculate_all_indicators(data)
         data = DataManager.calculate_buy_sell_volume(data)
         
         # Display metrics
-        current_price = float(data['Close'].iloc[-1])
-        period_high = float(data['High'].max())
-        period_low = float(data['Low'].min())
-        price_change = float(data['Close'].iloc[-1] - data['Close'].iloc[0])
-        price_change_pct = (price_change / float(data['Close'].iloc[0])) * 100
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric(
-            "Current Price", 
-            f"${current_price:.2f}", 
-            f"{price_change_pct:.2f}%"
-        )
-        col2.metric("Period High", f"${period_high:.2f}")
-        col3.metric("Period Low", f"${period_low:.2f}")
+        display_metrics(data)
         
         # Display chart
         chart = ChartManager.create_chart(
@@ -242,10 +228,7 @@ try:
             st.plotly_chart(chart, use_container_width=True)
 
         # Display last update time
-        st.sidebar.write(f"Last updated: {st.session_state['last_update'].strftime('%H:%M:%S')}")
-            
-except Exception as e:
-    st.error(f"Error in dashboard: {str(e)}")
+        st.sidebar.write(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
 
-# Add auto-refresh using Streamlit's built-in functionality
-st.empty()
+if __name__ == "__main__":
+    main()
