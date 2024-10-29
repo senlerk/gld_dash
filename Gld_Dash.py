@@ -101,22 +101,22 @@ def calculate_buy_sell_volume(data):
     
     return data
 
-def get_gld_data():
+def get_gld_data(timeframe='1d', interval='1m'):
     gld = yf.Ticker("GLD")
-    data = gld.history(period='1d', interval='1m')
+    if timeframe == '1mo':
+        data = gld.history(period='1mo', interval='1h')
+    else:
+        data = gld.history(period=timeframe, interval=interval)
     return data
 
 def save_daily_summary(current_price, day_high, day_low, buy_volume, sell_volume, trend):
     try:
-        # Skip if any value is NaN or None
         if pd.isna([current_price, day_high, day_low, buy_volume, sell_volume]).any():
             return
 
-        # Skip if we don't have valid trend data
         if not isinstance(trend, str) or not any(symbol in trend for symbol in ['🟢', '🔴', '⚪']):
             return
             
-        # Create a single row of data
         data = pd.DataFrame([{
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'current_price': f"{float(current_price):.2f}",
@@ -129,7 +129,6 @@ def save_daily_summary(current_price, day_high, day_low, buy_volume, sell_volume
 
         file_path = 'gld_daily_data.csv'
         
-        # Write to CSV
         data.to_csv(file_path, 
                    mode='a',
                    header=not os.path.exists(file_path),
@@ -138,7 +137,7 @@ def save_daily_summary(current_price, day_high, day_low, buy_volume, sell_volume
     except Exception as e:
         st.error(f"Error saving to CSV: {e}")
 
-def create_price_chart(data):
+def create_price_chart(data, title_prefix="GLD"):
     fig = go.Figure()
     
     fig.add_trace(go.Scatter(
@@ -146,11 +145,7 @@ def create_price_chart(data):
         y=data['VWAP'],
         name='VWAP',
         line=dict(color='purple', width=1),
-        hoverinfo='y',
-        hoverlabel=dict(
-            bgcolor='rgba(50, 50, 50, 0.9)',
-            font=dict(color='white', size=14)
-        )
+        hoverinfo='y'
     ))
     
     fig.add_trace(go.Candlestick(
@@ -160,23 +155,7 @@ def create_price_chart(data):
         low=data['Low'],
         close=data['Close'],
         name='GLD',
-        hoverinfo='all',
-        hoverlabel=dict(
-            bgcolor='rgba(50, 50, 50, 0.9)',
-            font=dict(color='white', size=14)
-        ),
-        text=[f"Time: {idx}<br>" +
-              f"Open: ${o:.2f}<br>" +
-              f"High: ${h:.2f}<br>" +
-              f"Low: ${l:.2f}<br>" +
-              f"Close: ${c:.2f}<br>" +
-              f"VWAP: ${v:.2f}"
-              for idx, o, h, l, c, v in zip(data.index, 
-                                       data['Open'], 
-                                       data['High'], 
-                                       data['Low'], 
-                                       data['Close'],
-                                       data['VWAP'])]
+        hoverinfo='all'
     ))
     
     fig.add_trace(go.Bar(
@@ -184,12 +163,7 @@ def create_price_chart(data):
         y=data['Buy_Volume'],
         name='Buy Volume',
         marker_color='rgba(0, 255, 0, 0.3)',
-        yaxis='y2',
-        hoverinfo='y',
-        hoverlabel=dict(
-            bgcolor='rgba(50, 50, 50, 0.9)',
-            font=dict(color='white', size=14)
-        )
+        yaxis='y2'
     ))
     
     fig.add_trace(go.Bar(
@@ -197,49 +171,32 @@ def create_price_chart(data):
         y=data['Sell_Volume'],
         name='Sell Volume',
         marker_color='rgba(255, 0, 0, 0.3)',
-        yaxis='y2',
-        hoverinfo='y',
-        hoverlabel=dict(
-            bgcolor='rgba(50, 50, 50, 0.9)',
-            font=dict(color='white', size=14)
-        )
+        yaxis='y2'
     ))
     
     fig.add_trace(go.Scatter(
         x=data.index,
         y=data['SMA20'],
         name='20 MA',
-        line=dict(color='yellow', width=1),
-        hoverinfo='y',
-        hoverlabel=dict(
-            bgcolor='rgba(50, 50, 50, 0.9)',
-            font=dict(color='white', size=14)
-        )
+        line=dict(color='yellow', width=1)
     ))
     
     fig.add_trace(go.Scatter(
         x=data.index,
         y=data['SMA50'],
         name='50 MA',
-        line=dict(color='orange', width=1),
-        hoverinfo='y',
-        hoverlabel=dict(
-            bgcolor='rgba(50, 50, 50, 0.9)',
-            font=dict(color='white', size=14)
-        )
+        line=dict(color='orange', width=1)
     ))
     
     fig.update_layout(
-        title='GLD Price Chart with Volume Analysis',
+        title=f'{title_prefix} Price Chart with Volume Analysis',
         yaxis_title='Price (USD)',
         xaxis_title='Time',
         template='plotly_dark',
         height=800,
         xaxis_rangeslider=dict(
             visible=True,
-            thickness=0.1,
-            bgcolor='rgba(100, 100, 255, 0.1)',
-            bordercolor='rgba(100, 100, 255, 0.4)',
+            thickness=0.1
         ),
         yaxis2=dict(
             title='Volume',
@@ -247,12 +204,33 @@ def create_price_chart(data):
             side='right',
             showgrid=False,
             tickformat=',.0f'
-        ),
-        margin=dict(l=50, r=50, t=50, b=50),
-        font=dict(size=14),
+        )
     )
     
     return fig
+
+def display_metrics(data, container):
+    current_price = float(data['Close'].iloc[-1])
+    period_high = float(data['High'].max())
+    period_low = float(data['Low'].min())
+    buy_volume = int(data['Buy_Volume'].sum())
+    sell_volume = int(data['Sell_Volume'].sum())
+    price_change = float(data['Close'].iloc[-1] - data['Close'].iloc[0])
+    price_change_pct = (price_change / float(data['Close'].iloc[0])) * 100
+
+    with container:
+        col1, col2 = st.columns(2)
+        col1.metric("Buy Volume", f"{buy_volume:,.0f}")
+        col2.metric("Sell Volume", f"{sell_volume:,.0f}")
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric(
+            "Current Price",
+            f"${current_price:.2f}",
+            f"{price_change:.2f} ({price_change_pct:.2f}%)"
+        )
+        col2.metric("Period High", f"${period_high:.2f}")
+        col3.metric("Period Low", f"${period_low:.2f}")
 
 def main():
     st.set_page_config(
@@ -263,87 +241,96 @@ def main():
     
     st.title("📈 Real-time GLD Price Dashboard")
     
-    csv_status = st.empty()
-    trend_placeholder = st.empty()
-    price_placeholder = st.empty()
-    chart_placeholder = st.empty()
-    
     refresh_rate = st.sidebar.slider(
         "Refresh Rate (seconds)",
         min_value=5,
         max_value=60,
         value=30
     )
-    
+
     if 'chart_key' not in st.session_state:
         st.session_state.chart_key = 0
+
+    # Create tabs
+    daily_tab, monthly_tab = st.tabs(["Daily View", "Monthly View"])
+    
+    # Create placeholder containers for each tab
+    with daily_tab:
+        daily_csv_status = st.empty()
+        daily_trend_placeholder = st.empty()
+        daily_metrics_placeholder = st.empty()
+        daily_chart_placeholder = st.empty()
+
+    with monthly_tab:
+        monthly_trend_placeholder = st.empty()
+        monthly_metrics_placeholder = st.empty()
+        monthly_chart_placeholder = st.empty()
     
     while True:
         try:
-            data = get_gld_data()
-            if data.empty:
-                continue
-            
-            trend, reasons, data = analyze_trend(data)
-            data = calculate_buy_sell_volume(data)
-            
-            try:
-                current_price = float(data['Close'].iloc[-1])
-                day_high = float(data['High'].max())
-                day_low = float(data['Low'].min())
-                buy_volume = int(data['Buy_Volume'].sum())
-                sell_volume = int(data['Sell_Volume'].sum())
-                price_change = float(data['Close'].iloc[-1] - data['Close'].iloc[0])
-                price_change_pct = (price_change / float(data['Close'].iloc[0])) * 100
+            # Fetch and process daily data
+            daily_data = get_gld_data(timeframe='1d', interval='1m')
+            if not daily_data.empty:
+                daily_trend, daily_reasons, daily_data = analyze_trend(daily_data)
+                daily_data = calculate_buy_sell_volume(daily_data)
                 
-                if all([current_price, day_high, day_low, buy_volume, sell_volume, trend]):
-                    save_daily_summary(current_price, day_high, day_low, 
-                                    buy_volume, sell_volume, trend)
-                    
-                    last_update = datetime.now().strftime('%H:%M:%S')
-                    csv_status.success(f"Data saved to gld_daily.csv (Last update: {last_update})")
-                    
-                    with trend_placeholder.container():
-                        st.subheader(f"Current Trend: {trend}")
-                        st.write("Analysis based on:")
-                        for reason in reasons:
-                            st.write(f"• {reason}")
+                with daily_tab:
+                    # Update daily view
+                    try:
+                        current_price = float(daily_data['Close'].iloc[-1])
+                        day_high = float(daily_data['High'].max())
+                        day_low = float(daily_data['Low'].min())
+                        buy_volume = int(daily_data['Buy_Volume'].sum())
+                        sell_volume = int(daily_data['Sell_Volume'].sum())
                         
-                        col1, col2 = st.columns(2)
-                        col1.metric("Buy Volume", f"{buy_volume:,.0f}")
-                        col2.metric("Sell Volume", f"{sell_volume:,.0f}")
-                    
-                    with price_placeholder.container():
-                        col1, col2, col3 = st.columns(3)
+                        save_daily_summary(current_price, day_high, day_low, 
+                                        buy_volume, sell_volume, daily_trend)
                         
-                        col1.metric(
-                            "Current Price",
-                            f"${current_price:.2f}",
-                            f"{price_change:.2f} ({price_change_pct:.2f}%)"
-                        )
+                        last_update = datetime.now().strftime('%H:%M:%S')
+                        daily_csv_status.success(f"Data saved to gld_daily.csv (Last update: {last_update})")
                         
-                        col2.metric(
-                            "Day High",
-                            f"${day_high:.2f}"
-                        )
+                        with daily_trend_placeholder.container():
+                            st.subheader(f"Current Trend: {daily_trend}")
+                            st.write("Analysis based on:")
+                            for reason in daily_reasons:
+                                st.write(f"• {reason}")
                         
-                        col3.metric(
-                            "Day Low",
-                            f"${day_low:.2f}"
-                        )
-                    
-                    with chart_placeholder:
-                        st.plotly_chart(
-                            create_price_chart(data),
+                        display_metrics(daily_data, daily_metrics_placeholder)
+                        
+                        daily_chart_placeholder.plotly_chart(
+                            create_price_chart(daily_data, "Daily GLD"),
                             use_container_width=True,
-                            key=f"chart_{st.session_state.chart_key}"
+                            key=f"daily_chart_{st.session_state.chart_key}"
                         )
-                        st.session_state.chart_key += 1
-            
-            except (ValueError, IndexError, TypeError) as e:
-                print(f"Error processing data: {e}")
-                continue
-            
+                    except Exception as e:
+                        st.error(f"Error processing daily data: {e}")
+
+            # Fetch and process monthly data
+            monthly_data = get_gld_data(timeframe='1mo', interval='1h')
+            if not monthly_data.empty:
+                monthly_trend, monthly_reasons, monthly_data = analyze_trend(monthly_data)
+                monthly_data = calculate_buy_sell_volume(monthly_data)
+                
+                with monthly_tab:
+                    # Update monthly view
+                    try:
+                        with monthly_trend_placeholder.container():
+                            st.subheader(f"Monthly Trend: {monthly_trend}")
+                            st.write("Analysis based on:")
+                            for reason in monthly_reasons:
+                                st.write(f"• {reason}")
+                        
+                        display_metrics(monthly_data, monthly_metrics_placeholder)
+                        
+                        monthly_chart_placeholder.plotly_chart(
+                            create_price_chart(monthly_data, "Monthly GLD"),
+                            use_container_width=True,
+                            key=f"monthly_chart_{st.session_state.chart_key}"
+                        )
+                    except Exception as e:
+                        st.error(f"Error processing monthly data: {e}")
+
+            st.session_state.chart_key += 1
             time.sleep(refresh_rate)
             
         except Exception as e:
