@@ -1,12 +1,39 @@
 import streamlit as st
 import yfinance as yf
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import time
 import pandas as pd
-import os
+from datetime import datetime, timedelta
+import plotly.graph_objects as go
+import time
 import numpy as np
 
+# Original metal price functions
+def get_metal_price(symbol):
+    """Get metal price from Yahoo Finance"""
+    ticker = yf.Ticker(symbol)
+    end = datetime.now()
+    start = end - timedelta(days=1)
+    df = ticker.history(start=start, end=end, interval='5m')
+    return df
+
+def create_price_chart(df, title):
+    """Create a candlestick chart for metals"""
+    fig = go.Figure(data=[go.Candlestick(x=df.index,
+                                        open=df['Open'],
+                                        high=df['High'],
+                                        low=df['Low'],
+                                        close=df['Close'])])
+    
+    fig.update_layout(title=title,
+                     yaxis_title='Price (USD)',
+                     xaxis_title='Time')
+    
+    return fig
+
+def format_price(price):
+    """Format price with appropriate decimal places"""
+    return f"${price:,.2f}"
+
+# GLD Analysis functions
 def analyze_trend(data):
     """Analyze the trend using multiple indicators"""
     data['SMA20'] = data['Close'].rolling(window=20).mean()
@@ -57,6 +84,7 @@ def analyze_trend(data):
     return trend, reasons, data
 
 def calculate_buy_sell_volume(data):
+    """Calculate buy and sell volume"""
     data['Typical_Price'] = (data['High'] + data['Low'] + data['Close']) / 3
     data['VP'] = data['Typical_Price'] * data['Volume']
     data['Cumulative_VP'] = data['VP'].cumsum()
@@ -81,35 +109,11 @@ def calculate_buy_sell_volume(data):
         )
     )
     
-    data['Sell_Volume'] = np.where(
-        (data['Close'] < data['VWAP']) & 
-        (data['Price_Change'] < 0) & 
-        (data['Close'] < data['Open']),
-        data['Volume'] * data['Relative_Volume'],
-        np.where(
-            (data['Close'] < data['VWAP']),
-            data['Volume'] * 0.7,
-            data['Volume'] * 0.3
-        )
-    )
-    
-    total_volume = data['Volume'].sum()
-    calculated_volume = data['Buy_Volume'].sum() + data['Sell_Volume'].sum()
-    
-    data['Buy_Volume'] = (data['Buy_Volume'] / calculated_volume) * total_volume
-    data['Sell_Volume'] = (data['Sell_Volume'] / calculated_volume) * total_volume
-    
+    data['Sell_Volume'] = data['Volume'] - data['Buy_Volume']
     return data
 
-def get_gld_data(timeframe='1d', interval='1m'):
-    gld = yf.Ticker("GLD")
-    if timeframe == '1mo':
-        data = gld.history(period='1mo', interval='1h')
-    else:
-        data = gld.history(period=timeframe, interval=interval)
-    return data
-
-def create_price_chart(data, title_prefix="GLD"):
+def create_gld_chart(data, title_prefix="GLD"):
+    """Create enhanced chart for GLD analysis"""
     fig = go.Figure()
     
     fig.add_trace(go.Scatter(
@@ -126,8 +130,7 @@ def create_price_chart(data, title_prefix="GLD"):
         high=data['High'],
         low=data['Low'],
         close=data['Close'],
-        name='GLD',
-        hoverinfo='all'
+        name='GLD'
     ))
     
     fig.add_trace(go.Bar(
@@ -146,157 +149,121 @@ def create_price_chart(data, title_prefix="GLD"):
         yaxis='y2'
     ))
     
-    fig.add_trace(go.Scatter(
-        x=data.index,
-        y=data['SMA20'],
-        name='20 MA',
-        line=dict(color='yellow', width=1)
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=data.index,
-        y=data['SMA50'],
-        name='50 MA',
-        line=dict(color='orange', width=1)
-    ))
-    
     fig.update_layout(
         title=f'{title_prefix} Price Chart with Volume Analysis',
         yaxis_title='Price (USD)',
         xaxis_title='Time',
-        template='plotly_dark',
         height=800,
-        xaxis_rangeslider=dict(
-            visible=True,
-            thickness=0.1
-        ),
         yaxis2=dict(
             title='Volume',
             overlaying='y',
             side='right',
-            showgrid=False,
-            tickformat=',.0f'
+            showgrid=False
         )
     )
     
     return fig
 
-def display_metrics(data, container):
-    current_price = float(data['Close'].iloc[-1])
-    period_high = float(data['High'].max())
-    period_low = float(data['Low'].min())
-    buy_volume = int(data['Buy_Volume'].sum())
-    sell_volume = int(data['Sell_Volume'].sum())
-    price_change = float(data['Close'].iloc[-1] - data['Close'].iloc[0])
-    price_change_pct = (price_change / float(data['Close'].iloc[0])) * 100
-
-    with container:
-        col1, col2 = st.columns(2)
-        col1.metric("Buy Volume", f"{buy_volume:,.0f}")
-        col2.metric("Sell Volume", f"{sell_volume:,.0f}")
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric(
-            "Current Price",
-            f"${current_price:.2f}",
-            f"{price_change:.2f} ({price_change_pct:.2f}%)"
-        )
-        col2.metric("Period High", f"${period_high:.2f}")
-        col3.metric("Period Low", f"${period_low:.2f}")
-
 def main():
-    st.set_page_config(
-        page_title="GLD Price Dashboard",
-        page_icon="📈",
-        layout="wide"
-    )
+    st.set_page_config(page_title='Metals Dashboard',
+                      layout='wide')
     
-    st.title("📈 Real-time GLD Price Dashboard")
+    st.title('📈 Precious Metals Dashboard')
+    st.markdown('---')
     
-    # Convert refresh rate to minutes
-    refresh_rate = st.sidebar.slider(
-        "Refresh Rate (minutes)",
-        min_value=1,
-        max_value=30,
-        value=5
-    )
+    # Initialize session state
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = time.time()
     
-    # Convert minutes to seconds for the sleep function
-    refresh_seconds = refresh_rate * 60
-
-    if 'chart_key' not in st.session_state:
-        st.session_state.chart_key = 0
-
-    # Create tabs
-    daily_tab, monthly_tab = st.tabs(["Daily View", "Monthly View"])
+    # Add refresh button
+    if st.button('🔄 Refresh Data'):
+        st.session_state.last_refresh = time.time()
+        st.rerun()
     
-    # Create placeholder containers for each tab
-    with daily_tab:
-        daily_trend_placeholder = st.empty()
-        daily_metrics_placeholder = st.empty()
-        daily_chart_placeholder = st.empty()
-
-    with monthly_tab:
-        monthly_trend_placeholder = st.empty()
-        monthly_metrics_placeholder = st.empty()
-        monthly_chart_placeholder = st.empty()
+    # Create three tabs
+    gold_tab, silver_tab, gld_tab = st.tabs(["Gold Spot", "Silver Spot", "GLD Analysis"])
     
-    while True:
-        try:
-            # Fetch and process daily data
-            daily_data = get_gld_data(timeframe='1d', interval='1m')
-            if not daily_data.empty:
-                daily_trend, daily_reasons, daily_data = analyze_trend(daily_data)
-                daily_data = calculate_buy_sell_volume(daily_data)
+    try:
+        # Get metal prices data
+        gold_df = get_metal_price('GC=F')
+        silver_df = get_metal_price('SI=F')
+        gld_df = yf.download('GLD', period='1d', interval='1m')
+        
+        # Process GLD data
+        if not gld_df.empty:
+            gld_trend, gld_reasons, gld_df = analyze_trend(gld_df)
+            gld_df = calculate_buy_sell_volume(gld_df)
+        
+        # Gold Tab
+        with gold_tab:
+            if not gold_df.empty:
+                gold_current_price = gold_df['Close'][-1]
+                gold_open_price = gold_df['Open'][0]
+                gold_change = ((gold_current_price - gold_open_price) / gold_open_price * 100)
                 
-                with daily_tab:
-                    try:
-                        with daily_trend_placeholder.container():
-                            st.subheader(f"Current Trend: {daily_trend}")
-                            st.write("Analysis based on:")
-                            for reason in daily_reasons:
-                                st.write(f"• {reason}")
-                        
-                        display_metrics(daily_data, daily_metrics_placeholder)
-                        
-                        daily_chart_placeholder.plotly_chart(
-                            create_price_chart(daily_data, "Daily GLD"),
-                            use_container_width=True,
-                            key=f"daily_chart_{st.session_state.chart_key}"
-                        )
-                    except Exception as e:
-                        st.error(f"Error processing daily data: {e}")
-
-            # Fetch and process monthly data
-            monthly_data = get_gld_data(timeframe='1mo', interval='1h')
-            if not monthly_data.empty:
-                monthly_trend, monthly_reasons, monthly_data = analyze_trend(monthly_data)
-                monthly_data = calculate_buy_sell_volume(monthly_data)
+                st.metric(
+                    "Current Price",
+                    format_price(gold_current_price),
+                    delta=f"{gold_change:.2f}%"
+                )
+                st.plotly_chart(create_price_chart(gold_df, 'Gold Price Last 24 Hours'),
+                              use_container_width=True)
                 
-                with monthly_tab:
-                    try:
-                        with monthly_trend_placeholder.container():
-                            st.subheader(f"Monthly Trend: {monthly_trend}")
-                            st.write("Analysis based on:")
-                            for reason in monthly_reasons:
-                                st.write(f"• {reason}")
-                        
-                        display_metrics(monthly_data, monthly_metrics_placeholder)
-                        
-                        monthly_chart_placeholder.plotly_chart(
-                            create_price_chart(monthly_data, "Monthly GLD"),
-                            use_container_width=True,
-                            key=f"monthly_chart_{st.session_state.chart_key}"
-                        )
-                    except Exception as e:
-                        st.error(f"Error processing monthly data: {e}")
-
-            st.session_state.chart_key += 1
-            time.sleep(refresh_seconds)
-            
-        except Exception as e:
-            st.error(f"Error fetching data: {e}")
-            time.sleep(refresh_seconds)
+                st.subheader("Today's Statistics")
+                st.write(f"High: {format_price(gold_df['High'].max())}")
+                st.write(f"Low: {format_price(gold_df['Low'].min())}")
+                st.write(f"Opening: {format_price(gold_open_price)}")
+            else:
+                st.warning("No Gold price data available.")
+        
+        # Silver Tab
+        with silver_tab:
+            if not silver_df.empty:
+                silver_current_price = silver_df['Close'][-1]
+                silver_open_price = silver_df['Open'][0]
+                silver_change = ((silver_current_price - silver_open_price) / silver_open_price * 100)
+                
+                st.metric(
+                    "Current Price",
+                    format_price(silver_current_price),
+                    delta=f"{silver_change:.2f}%"
+                )
+                st.plotly_chart(create_price_chart(silver_df, 'Silver Price Last 24 Hours'),
+                              use_container_width=True)
+                
+                st.subheader("Today's Statistics")
+                st.write(f"High: {format_price(silver_df['High'].max())}")
+                st.write(f"Low: {format_price(silver_df['Low'].min())}")
+                st.write(f"Opening: {format_price(silver_open_price)}")
+            else:
+                st.warning("No Silver price data available.")
+        
+        # GLD Analysis Tab
+        with gld_tab:
+            if not gld_df.empty:
+                st.subheader(f"Current Trend: {gld_trend}")
+                st.write("Analysis based on:")
+                for reason in gld_reasons:
+                    st.write(f"• {reason}")
+                
+                # Display metrics
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Buy Volume", f"{int(gld_df['Buy_Volume'].sum()):,}")
+                with col2:
+                    st.metric("Sell Volume", f"{int(gld_df['Sell_Volume'].sum()):,}")
+                
+                st.plotly_chart(create_gld_chart(gld_df), use_container_width=True)
+            else:
+                st.warning("No GLD data available.")
+        
+        # Add last update time
+        st.markdown("---")
+        st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    except Exception as e:
+        st.error("An error occurred while fetching the data.")
+        st.exception(e)
 
 if __name__ == "__main__":
     main()
